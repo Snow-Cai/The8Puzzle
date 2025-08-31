@@ -1,4 +1,4 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -16,6 +16,9 @@ public class GameManager : MonoBehaviour
     private int[] goal;
 
     [Header("AI Solve")]
+    [SerializeField] private int difficultyLevel = 0; // default 3x3
+    [SerializeField] private TMPro.TMP_Text difficultyLabel;
+    [SerializeField] private int shuffleMoves = 10;
     private bool isSolving = false;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -24,6 +27,13 @@ public class GameManager : MonoBehaviour
         BuildGoal();
         BuildBoard(); // sets up the tiles in a grid
         NewGame();
+
+        int startSize = BoardSizeForDifficulty(difficultyLevel);
+        SetSize(startSize); // ensure board is set to initial difficulty size
+        if (difficultyLabel != null)
+        {
+            difficultyLabel.text = DifficultyName(difficultyLevel);
+        }
     }
 
     // Update is called once per frame
@@ -62,11 +72,13 @@ public class GameManager : MonoBehaviour
 
     public void NewGame() //make sure it's solvable
     {
-        //if (tiles.Count != numTiles * numTiles)
-        //    BuildBoard();
+        if (tiles.Count != numTiles * numTiles)
+            BuildBoard();
 
         state = (int[])goal.Clone();
-        state = ShuffleByRandomMoves(state, numTiles, 50);
+
+        shuffleMoves = GetBfsEasyShuffle(numTiles);
+        state = ShuffleByRandomMoves(state, numTiles, shuffleMoves);
         ApplyToUI();
     }
 
@@ -140,7 +152,7 @@ public class GameManager : MonoBehaviour
         for (int i = 0; i < k; i++)
         {
             var moves = MovableTiles(s, n);
-            if (moves.Count > 0) moves.RemoveAll(st => st.b == lastBlank);
+            if (moves.Count > 1) moves.RemoveAll(st => st.b == lastBlank);
             var pick = moves[rand.Next(moves.Count)];
             lastBlank = pick.a;
             s = Apply(s, pick);
@@ -148,27 +160,100 @@ public class GameManager : MonoBehaviour
         return s;
     }
 
+    // choose tiny shuffle depths so BFS is safe
+    int GetBfsEasyShuffle(int n)
+    {
+        if (n == 3) return 12;
+        if (n == 4) return 16;   
+        if (n == 5) return 14;  
+        if (n == 6) return 13;   
+        return 15;
+    }
+
+    // slider helper
+    int BoardSizeForDifficulty(int d)
+    {
+        if (d == 0) return 3;   // Easy
+        if (d == 1) return 4;   // Medium
+        if (d == 2) return 5;   // Hard
+        return 6;               // Extreme
+    }
+
+    string DifficultyName(int d)
+    {
+        if (d == 0) return "Difficulty Level: Easy (3×3)";
+        if (d == 1) return "Difficulty Level: Medium (4×4)";
+        if (d == 2) return "Difficulty Level: Hard (5×5)";
+        return "Difficulty Level: Extreme (6×6)";
+    }
+
+    public void SetSize(int n)
+    {
+        n = Mathf.Clamp(n, 3, 6);
+        if (n == numTiles) return;
+
+        numTiles = n;
+        BuildGoal();
+        BuildBoard();
+        NewGame();
+    }
+
+    public void OnDifficultySliderChanged(float v)
+    {
+        difficultyLevel = Mathf.Clamp((int)v, 0, 3);
+
+        int newSize = BoardSizeForDifficulty(difficultyLevel);
+
+        // Rebuild only if size actually changed
+        if (newSize != numTiles)
+        {
+            SetSize(newSize);  // See method below
+        }
+
+        if (difficultyLabel != null)
+        {
+            difficultyLabel.text = DifficultyName(difficultyLevel);
+        }
+
+        // Debug to confirm it’s firing:
+        Debug.Log($"Slider changed → level={difficultyLevel}, target size={newSize}");
+    }
+
+
     // AI solve
-    public void SolveBFS()
+    public void Solve()
     {
         if (isSolving) return;
 
         // compute path first
         var startCopy = (int[])state.Clone();
-        var path = BFS(startCopy, goal, numTiles);
+        List<Swap> path = null;
+
+        if (numTiles >= 3)
+        {
+            // BFS for 3×3
+            path = BFS(startCopy, goal, numTiles);
+        }
+        else
+        {
+            // DFS for 4×4..6×6
+            int depthCap = Mathf.Max(shuffleMoves + 10, 100); // safety margin
+            path = IDDFS(startCopy, goal, numTiles, depthCap);
+        }
 
         if (path == null)
         {
-            Debug.LogWarning("BFS: no path found.");
+            Debug.LogWarning("No path found.");
             return;
         }
+
         if (path.Count == 0)
         {
             Debug.Log("Already solved.");
             return;
         }
 
-        StartCoroutine(BFSAnimation(path, 0.2f)); // adjust delay to taste
+        StartCoroutine(PathAnimation(path, 0.2f)); // adjust delay to taste
     }
 
     List<Swap> BFS(int[] start, int[] goal, int n, int maxNodes = 500000)
@@ -221,7 +306,83 @@ public class GameManager : MonoBehaviour
         return null; // not found
     }
 
-    IEnumerator BFSAnimation(List<Swap> path, float delay = 0.2f)
+    List<Swap> IDDFS(int[] start, int[] goal, int n, int maxDepth, int maxNodes = 500000)
+    {
+        for (int limit = 0; limit <= maxDepth; limit++)
+        {
+            var result = DFS(start, goal, n, limit, maxNodes);
+            if (result != null) return result;
+        }
+        return null;
+    }
+
+    List<Swap> DFS(int[] start, int[] goal, int n, int depthCap, int maxNodes = 500000)
+    {
+        string Key(int[] s) => string.Join(",", s);
+
+        var stack = new Stack<(int[] state, int depth)>();
+        //var visited = new HashSet<string>();
+        var bestDepth = new Dictionary<string, int>();
+        var parent = new Dictionary<string, (string pk, Swap move)>();
+        
+        string sKey = Key(start), gKey = Key(goal);
+        if (sKey == gKey) return new List<Swap>();
+        
+        stack.Push((start, 0));
+        //visited.Add(sKey);
+        bestDepth[sKey] = 0;
+        parent[sKey] = (null, new Swap(-1, -1));
+        int nodes = 0;
+        
+        while (stack.Count > 0 && nodes < maxNodes)
+        {
+            nodes++;
+            var (s, depth) = stack.Pop();
+            var sK = Key(s);
+
+            if (depth >= depthCap) continue;
+            
+            var moves = MovableTiles(s, n);
+            foreach (var m in moves)
+            {
+                var t = Apply(s, m);
+                var tK = Key(t);
+
+                int nextDepth = depth + 1;
+
+                if (bestDepth.TryGetValue(tK, out int seenDepth) && seenDepth <= nextDepth)
+                {
+                    continue;
+                }
+
+                //if (visited.Contains(tK)) continue;
+                //visited.Add(tK);
+
+                bestDepth[tK] = nextDepth;
+                parent[tK] = (sK, m);
+                
+                if (tK == gKey)
+                {
+                    // found the goal, backtrack to get the path
+                    var path = new List<Swap>();
+                    var cur = tK;
+                    
+                    while (parent[cur].pk != null)
+                    {
+                        var (pk, move) = parent[cur];
+                        path.Add(move);
+                        cur = pk;
+                    }
+                    path.Reverse();
+
+                    return path;
+                }
+                stack.Push((t, depth + 1));
+            }
+        }
+        return null; // not found
+    }
+    IEnumerator PathAnimation(List<Swap> path, float delay = 0.2f)
     {
         if (path == null || path.Count == 0) yield break;
         isSolving = true;

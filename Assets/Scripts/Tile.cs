@@ -4,6 +4,9 @@ using UnityEngine.UI;
 
 public class Tile : MonoBehaviour
 {
+    public Image tileImage;     // background image on the Button
+    public CanvasGroup numberGroup; // optional: fade the number overlay
+
     public int value; // 0 means empty space
     public Button button;
     public TMP_Text buttonNum;
@@ -29,4 +32,34 @@ public class Tile : MonoBehaviour
     {
         if (button) button.interactable = interactable && (value != 0);
     }
+
+    public void SetSprite(Sprite s)
+    {
+        if (tileImage == null) tileImage = GetComponent<Image>();
+        if (tileImage != null) tileImage.sprite = s;
+    }
+
+    public void SetImageTint(Color c)
+    {
+        if (tileImage == null) tileImage = GetComponent<Image>();
+        if (tileImage != null) tileImage.color = c;
+    }
+
+    public void SetNumberVisible(bool on)
+    {
+        if (buttonNum != null)
+        {
+            if (numberGroup != null)
+            {
+                numberGroup.alpha = on ? 1f : 0f;
+                numberGroup.blocksRaycasts = on;
+                numberGroup.interactable = on;
+            }
+            else
+            {
+                buttonNum.gameObject.SetActive(on);
+            }
+        }
+    }
+
 }

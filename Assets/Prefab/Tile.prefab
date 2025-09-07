@@ -68,8 +68,8 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
-  m_Type: 1
+  m_Sprite: {fileID: 5879006880202620273, guid: b04d5d292553d17479b7dbb5541af9fd, type: 3}
+  m_Type: 0
   m_PreserveAspect: 0
   m_FillCenter: 1
   m_FillMethod: 4
@@ -134,9 +134,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0c36f1f5eff5f1c4bbde19aa161ccef5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  tileImage: {fileID: 8238790579268708808}
+  numberGroup: {fileID: 4459308656986510526}
   value: 0
-  button: {fileID: 0}
-  buttonNum: {fileID: 0}
+  button: {fileID: 4719811071595939910}
+  buttonNum: {fileID: 7191555110325134510}
 --- !u!1 &8897232779611807644
 GameObject:
   m_ObjectHideFlags: 0
@@ -148,6 +150,7 @@ GameObject:
   - component: {fileID: 1180215546600321339}
   - component: {fileID: 7843389681428657827}
   - component: {fileID: 7191555110325134510}
+  - component: {fileID: 4459308656986510526}
   m_Layer: 5
   m_Name: Text (TMP)
   m_TagString: Untagged
@@ -211,8 +214,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4281479730
-  m_fontColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 1}
+    rgba: 4013044274
+  m_fontColor: {r: 0.19607843, g: 0.19607843, b: 0.19607843, a: 0.9372549}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -273,3 +276,15 @@ MonoBehaviour:
   m_hasFontAssetChanged: 0
   m_baseMaterial: {fileID: 0}
   m_maskOffset: {x: 0, y: 0, z: 0, w: 0}
+--- !u!225 &4459308656986510526
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8897232779611807644}
+  m_Enabled: 1
+  m_Alpha: 1
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0

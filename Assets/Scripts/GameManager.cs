@@ -26,16 +26,34 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int shuffleMoves = 10;
     private bool isSolving = false;
 
+    [Header("BFS Test Settings")]
     public int test3 = 12;
     public int test4 = 15;
     public int test5 = 20;
     public int test6 = 26;
+
+    [Header("Game HUD")]
+    public System.Action onPlayerMove;
+    public System.Action onPlayerSolved;
+    public System.Action onPlayerPressedSolve;
+    public System.Action onPlayerHint;
+
+    [Header("Visuals")]
+    public bool useImage = true;               
+    public bool overlayNumbersInImageMode = true; 
+    public Texture2D puzzleImage;              
+    public Color blankTint = new Color(1, 1, 1, 0);
+    public Color tileTint = Color.white;        
+
+    // cache of sliced sprites for current N
+    private Sprite[] slicedSprites;             // length = numTiles*numTiles (last = null for blank)
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
         BuildGoal();
         BuildBoard(); // sets up the tiles in a grid
+        SliceImageForSize(numTiles);
         NewGame();
 
         int startSize = BoardSizeForDifficulty(difficultyLevel);
@@ -97,7 +115,37 @@ public class GameManager : MonoBehaviour
     void ApplyToUI()
     {
         for (int i = 0; i < state.Length; i++)
+        {
             tiles[i].Init(state[i], OnTileClicked);
+
+            // image vs number
+            if (useImage && slicedSprites != null && i < slicedSprites.Length)
+            {
+                // state[i] is 1..N*N-1 or 0 for blank
+                int v = state[i];
+                if (v == 0)
+                {
+                    tiles[i].SetSprite(null);
+                    tiles[i].SetImageTint(blankTint);
+                    tiles[i].SetNumberVisible(false);
+                }
+                else
+                {
+                    // value v is at solved index (v-1)
+                    var spr = slicedSprites[v - 1];
+                    tiles[i].SetSprite(spr);
+                    tiles[i].SetImageTint(tileTint);
+                    tiles[i].SetNumberVisible(overlayNumbersInImageMode); // hide numbers in image mode (or true if you want tiny labels)
+                }
+            }
+            else
+            {
+                // number mode
+                tiles[i].SetSprite(null);
+                tiles[i].SetImageTint(tileTint);
+                tiles[i].SetNumberVisible(true);
+            }
+        }
         if (IsGoal()) Debug.Log("Solved!");
     }
 
@@ -112,6 +160,10 @@ public class GameManager : MonoBehaviour
             // swap tile with blank
             (state[blank], state[indx]) = (state[indx], state[blank]);
             ApplyToUI();
+            onPlayerMove?.Invoke();
+
+            if (IsGoal())
+                onPlayerSolved?.Invoke();
         }
     }
 
@@ -182,6 +234,45 @@ public class GameManager : MonoBehaviour
         return 15;
     }
 
+    void SliceImageForSize(int n)
+    {
+        if (!useImage || puzzleImage == null)
+        {
+            slicedSprites = null;
+            return;
+        }
+
+        int dim = n;
+        slicedSprites = new Sprite[dim * dim];
+
+        float tileW = puzzleImage.width / (float)dim;
+        float tileH = puzzleImage.height / (float)dim;
+
+        int idx = 0;
+        for (int r = 0; r < dim; r++)
+        {
+            for (int c = 0; c < dim; c++)
+            {
+                // last tile is the blank
+                if (idx == dim * dim - 1)
+                {
+                    slicedSprites[idx] = null;
+                    idx++;
+                    continue;
+                }
+
+                var rect = new Rect(c * tileW, (dim - 1 - r) * tileH, tileW, tileH); // flip Y
+                slicedSprites[idx] = Sprite.Create(
+                    puzzleImage,
+                    rect,
+                    new Vector2(0.5f, 0.5f),
+                    100f, 0, SpriteMeshType.FullRect
+                );
+                idx++;
+            }
+        }
+    }
+
     // slider helper
     int BoardSizeForDifficulty(int d)
     {
@@ -207,6 +298,7 @@ public class GameManager : MonoBehaviour
         numTiles = n;
         BuildGoal();
         BuildBoard();
+        SliceImageForSize(numTiles);
         NewGame();
     }
 
@@ -232,6 +324,7 @@ public class GameManager : MonoBehaviour
     // AI solve
     public void Solve()
     {
+        onPlayerPressedSolve?.Invoke();
         if (isSolving) return;
 
         var startCopy = (int[])state.Clone();
@@ -264,9 +357,6 @@ public class GameManager : MonoBehaviour
         StartCoroutine(PathAnimation(path, 0.2f));
     }
 
-    // BiBFS using string-based keys with faster meeting point logic and clean path reconstruction
-    // Multithreaded BiBFS using string keys and task parallelism
-    // Multithreaded Balanced BiBFS using string keys
     List<Swap> BiBFS(int[] start, int[] goal, int n, int maxDepth = 30)
     {
         string GetKey(int[] board) => string.Join(",", board);
@@ -440,6 +530,9 @@ public class GameManager : MonoBehaviour
             tile.SetIneractable(true);
 
         isSolving = false;
+
+        if (IsGoal())
+            onPlayerSolved?.Invoke();
     }
 
     // last resort
@@ -470,6 +563,36 @@ public class GameManager : MonoBehaviour
         }
 
         return current;
+    }
+    public void HintOneMove()
+    {
+        onPlayerHint?.Invoke();
+
+        // minimal hint: compute a path once and highlight the first move
+        var startCopy = (int[])state.Clone();
+        var path = BiBFS(startCopy, goal, numTiles);
+
+        if (path != null && path.Count > 0)
+        {
+            var mv = path[0];
+            // highlight the tile at index mv.b (the one sliding into blank)
+            int tileIndex = mv.b; // mv = new Swap(blankIndex, neighborIndex)
+            var t = tiles[tileIndex];
+            StartCoroutine(HintPulse(t));
+        }
+    }
+
+    IEnumerator HintPulse(Tile t)
+    {
+        var rt = t.GetComponent<RectTransform>();
+        Vector3 start = rt.localScale;
+        for (float a = 0; a < 0.4f; a += Time.deltaTime)
+        {
+            float k = 1f + 0.08f * Mathf.Sin(a * Mathf.PI * 3f);
+            rt.localScale = start * k;
+            yield return null;
+        }
+        rt.localScale = start;
     }
 
 }

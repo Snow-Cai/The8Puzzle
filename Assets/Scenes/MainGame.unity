@@ -1295,6 +1295,10 @@ MonoBehaviour:
   difficultyLevel: 0
   difficultyLabel: {fileID: 1831214727}
   shuffleMoves: 50
+  test3: 12
+  test4: 17
+  test5: 21
+  test6: 25
 --- !u!1 &1557204969
 GameObject:
   m_ObjectHideFlags: 0

@@ -1,5 +1,10 @@
-﻿using System.Collections;
+﻿using System;
+using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -21,6 +26,11 @@ public class GameManager : MonoBehaviour
     [SerializeField] private int shuffleMoves = 10;
     private bool isSolving = false;
 
+    public int test3 = 12;
+    public int test4 = 15;
+    public int test5 = 20;
+    public int test6 = 26;
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -39,17 +49,17 @@ public class GameManager : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        
+
     }
 
     void BuildGoal()
     {
         goal = new int[numTiles * numTiles];
-        for (int i = 0; i < numTiles*numTiles; i++)
+        for (int i = 0; i < numTiles * numTiles; i++)
         {
             goal[i] = i + 1;
         }
-        goal[numTiles*numTiles - 1] = 0; // last is blank
+        goal[numTiles * numTiles - 1] = 0; // last is blank
     }
 
     void BuildBoard()
@@ -78,6 +88,8 @@ public class GameManager : MonoBehaviour
         state = (int[])goal.Clone();
 
         shuffleMoves = GetBfsEasyShuffle(numTiles);
+        Debug.Log($"Shuffling {numTiles}x{numTiles} board with {shuffleMoves} moves.");
+
         state = ShuffleByRandomMoves(state, numTiles, shuffleMoves);
         ApplyToUI();
     }
@@ -114,14 +126,14 @@ public class GameManager : MonoBehaviour
 
     // helpers
     struct Swap // swap a and b
-    { 
-        public int a, b; 
-        public Swap(int a, int b) 
-        { 
-            this.a = a; 
-            this.b = b; 
-        } 
-    } 
+    {
+        public int a, b;
+        public Swap(int a, int b)
+        {
+            this.a = a;
+            this.b = b;
+        }
+    }
 
     List<Swap> MovableTiles(int[] s, int n)
     {
@@ -163,10 +175,10 @@ public class GameManager : MonoBehaviour
     // choose tiny shuffle depths so BFS is safe
     int GetBfsEasyShuffle(int n)
     {
-        if (n == 3) return 12;
-        if (n == 4) return 16;   
-        if (n == 5) return 14;  
-        if (n == 6) return 13;   
+        if (n == 3) return test3;
+        if (n == 4) return test4;
+        if (n == 5) return test5;
+        if (n == 6) return test6;
         return 15;
     }
 
@@ -213,10 +225,7 @@ public class GameManager : MonoBehaviour
         if (difficultyLabel != null)
         {
             difficultyLabel.text = DifficultyName(difficultyLevel);
-        }
-
-        // Debug to confirm it’s firing:
-        Debug.Log($"Slider changed → level={difficultyLevel}, target size={newSize}");
+        }        
     }
 
 
@@ -225,26 +234,25 @@ public class GameManager : MonoBehaviour
     {
         if (isSolving) return;
 
-        // compute path first
         var startCopy = (int[])state.Clone();
         List<Swap> path = null;
 
-        if (numTiles >= 3)
-        {
-            // BFS for 3×3
-            path = BFS(startCopy, goal, numTiles);
-        }
-        else
-        {
-            // DFS for 4×4..6×6
-            int depthCap = Mathf.Max(shuffleMoves + 10, 100); // safety margin
-            path = IDDFS(startCopy, goal, numTiles, depthCap);
-        }
+        int shuffleDepth = GetBfsEasyShuffle(numTiles);
+
+        path = BiBFS(startCopy, goal, numTiles, maxDepth: shuffleDepth);
 
         if (path == null)
         {
-            Debug.LogWarning("No path found.");
-            return;
+            Debug.LogWarning("[Solve] BFS failed. Falling back to reverse shuffle.");
+
+            List<Swap> shufflePath;
+            state = ShuffleAndRecordMoves(goal, numTiles, shuffleDepth, out shufflePath);
+
+            path = new List<Swap>();
+            for (int i = shufflePath.Count - 1; i >= 0; i--)
+            {
+                path.Add(new Swap(shufflePath[i].b, shufflePath[i].a));
+            }
         }
 
         if (path.Count == 0)
@@ -253,135 +261,166 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        StartCoroutine(PathAnimation(path, 0.2f)); // adjust delay to taste
+        StartCoroutine(PathAnimation(path, 0.2f));
     }
 
-    List<Swap> BFS(int[] start, int[] goal, int n, int maxNodes = 500000)
+    // BiBFS using string-based keys with faster meeting point logic and clean path reconstruction
+    // Multithreaded BiBFS using string keys and task parallelism
+    // Multithreaded Balanced BiBFS using string keys
+    List<Swap> BiBFS(int[] start, int[] goal, int n, int maxDepth = 30)
     {
-        string Key(int[] s) => string.Join(",", s);
+        string GetKey(int[] board) => string.Join(",", board);
 
-        var q = new Queue<int[]>();
-        var visited = new HashSet<string>();
-        var parent = new Dictionary<string, (string pk, Swap move)>();
-
-        string sKey = Key(start), gKey = Key(goal);
-        if (sKey == gKey) return new List<Swap>();
-
-        q.Enqueue(start);
-        visited.Add(sKey);
-        parent[sKey] = (null, new Swap(-1, -1));
-
-        int nodes = 0;
-        while (q.Count > 0 && nodes < maxNodes)
+        bool AreEqual(int[] a, int[] b)
         {
-            nodes++;
-            var s = q.Dequeue();
-            var sK = Key(s);
-            var moves = MovableTiles(s, n);
-            foreach (var m in moves)
+            for (int i = 0; i < a.Length; i++)
+                if (a[i] != b[i])
+                    return false;
+            return true;
+        }
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var frontierF = new Queue<string>();
+        var frontierB = new Queue<string>();
+
+        var visitedF = new ConcurrentDictionary<string, (string prevKey, Swap move)>();
+        var visitedB = new ConcurrentDictionary<string, (string prevKey, Swap move)>();
+        var boardMap = new ConcurrentDictionary<string, int[]>();
+
+        string startKey = GetKey(start);
+        string goalKey = GetKey(goal);
+
+        frontierF.Enqueue(startKey);
+        visitedF[startKey] = (null, new Swap(-1, -1));
+        boardMap[startKey] = (int[])start.Clone();
+
+        frontierB.Enqueue(goalKey);
+        visitedB[goalKey] = (null, new Swap(-1, -1));
+        boardMap[goalKey] = (int[])goal.Clone();
+
+        if (AreEqual(start, goal))
+            return new List<Swap>();
+
+        string meetingKey = null;
+        for (int depth = 0; depth <= maxDepth; depth++)
+        {
+            if (frontierF.Count <= frontierB.Count)
             {
-                var t = Apply(s, m);
-                var tK = Key(t);
-                if (visited.Contains(tK)) continue;
-                visited.Add(tK);
-                parent[tK] = (sK, m);
-                if (tK == gKey)
+                ExpandLayerBalanced(frontierF, visitedF, visitedB, boardMap, n, ref meetingKey);
+            }
+            else
+            {
+                ExpandLayerBalanced(frontierB, visitedB, visitedF, boardMap, n, ref meetingKey);
+            }
+
+            if (meetingKey != null)
+            {
+                var path = ReconstructPath(meetingKey, visitedF, visitedB, boardMap, start, goal);
+                if (path != null)
                 {
-                    // found the goal, backtrack to get the path
-                    var path = new List<Swap>();
-                    var cur = tK;
-                    while (parent[cur].pk != null)
-                    {
-                        var (pk, move) = parent[cur];
-                        path.Add(move);
-                        cur = pk;
-                    }
-                    path.Reverse();
+                    Debug.Log($"[BiBFS] 🎯 Found in {path.Count} steps");
+                    Debug.Log($"[BiBFS] ⏱ Time taken: {stopwatch.Elapsed.TotalSeconds:F3} seconds");
                     return path;
                 }
-                q.Enqueue(t);
             }
         }
 
-        return null; // not found
-    }
-
-    List<Swap> IDDFS(int[] start, int[] goal, int n, int maxDepth, int maxNodes = 500000)
-    {
-        for (int limit = 0; limit <= maxDepth; limit++)
-        {
-            var result = DFS(start, goal, n, limit, maxNodes);
-            if (result != null) return result;
-        }
+        Debug.LogWarning("[BiBFS] ❌ No path found within depth limit");
+        Debug.Log($"[BiBFS] ⏱ Time taken: {stopwatch.Elapsed.TotalSeconds:F3} seconds");
         return null;
     }
 
-    List<Swap> DFS(int[] start, int[] goal, int n, int depthCap, int maxNodes = 500000)
+    void ExpandLayerBalanced(Queue<string> frontier,
+                             ConcurrentDictionary<string, (string prevKey, Swap move)> visitedThis,
+                             ConcurrentDictionary<string, (string prevKey, Swap move)> visitedOther,
+                             ConcurrentDictionary<string, int[]> boardMap,
+                             int n,
+                             ref string meetingKey)
     {
-        string Key(int[] s) => string.Join(",", s);
-
-        var stack = new Stack<(int[] state, int depth)>();
-        //var visited = new HashSet<string>();
-        var bestDepth = new Dictionary<string, int>();
-        var parent = new Dictionary<string, (string pk, Swap move)>();
-        
-        string sKey = Key(start), gKey = Key(goal);
-        if (sKey == gKey) return new List<Swap>();
-        
-        stack.Push((start, 0));
-        //visited.Add(sKey);
-        bestDepth[sKey] = 0;
-        parent[sKey] = (null, new Swap(-1, -1));
-        int nodes = 0;
-        
-        while (stack.Count > 0 && nodes < maxNodes)
+        int count;
+        lock (frontier) count = frontier.Count;
+        for (int i = 0; i < count; i++)
         {
-            nodes++;
-            var (s, depth) = stack.Pop();
-            var sK = Key(s);
-
-            if (depth >= depthCap) continue;
-            
-            var moves = MovableTiles(s, n);
-            foreach (var m in moves)
+            string currentKey;
+            lock (frontier)
             {
-                var t = Apply(s, m);
-                var tK = Key(t);
+                if (frontier.Count == 0) return;
+                currentKey = frontier.Dequeue();
+            }
 
-                int nextDepth = depth + 1;
+            var current = boardMap[currentKey];
 
-                if (bestDepth.TryGetValue(tK, out int seenDepth) && seenDepth <= nextDepth)
+            foreach (var move in MovableTiles(current, n))
+            {
+                var next = Apply(current, move);
+                string nextKey = string.Join(",", next);
+
+                if (visitedThis.ContainsKey(nextKey))
                 {
-                    continue;
+                    if (AreEqual(boardMap[nextKey], next)) continue;
                 }
 
-                //if (visited.Contains(tK)) continue;
-                //visited.Add(tK);
+                visitedThis[nextKey] = (currentKey, move);
+                boardMap[nextKey] = (int[])next.Clone();
 
-                bestDepth[tK] = nextDepth;
-                parent[tK] = (sK, m);
-                
-                if (tK == gKey)
+                if (visitedOther.ContainsKey(nextKey))
                 {
-                    // found the goal, backtrack to get the path
-                    var path = new List<Swap>();
-                    var cur = tK;
-                    
-                    while (parent[cur].pk != null)
+                    lock (boardMap)
                     {
-                        var (pk, move) = parent[cur];
-                        path.Add(move);
-                        cur = pk;
+                        if (meetingKey == null)
+                            meetingKey = nextKey;
                     }
-                    path.Reverse();
-
-                    return path;
                 }
-                stack.Push((t, depth + 1));
+
+                lock (frontier) frontier.Enqueue(nextKey);
             }
         }
-        return null; // not found
     }
+
+    bool AreEqual(int[] a, int[] b)
+    {
+        if (a.Length != b.Length) return false;
+        for (int i = 0; i < a.Length; i++)
+            if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    List<Swap> ReconstructPath(
+        string meetKey,
+        IDictionary<string, (string prevKey, Swap move)> visitedF,
+        IDictionary<string, (string prevKey, Swap move)> visitedB,
+        IDictionary<string, int[]> boardMap,
+        int[] start,
+        int[] goal)
+    {
+        var path = new List<Swap>();
+
+        string h = meetKey;
+        while (visitedF.ContainsKey(h) && visitedF[h].prevKey != null)
+        {
+            var (prev, m) = visitedF[h];
+            path.Add(m);
+            h = prev;
+        }
+        path.Reverse();
+
+        h = meetKey;
+        while (visitedB.ContainsKey(h) && visitedB[h].prevKey != null)
+        {
+            var (prev, m) = visitedB[h];
+            path.Add(new Swap(m.b, m.a));
+            h = prev;
+        }
+
+        var testBoard = (int[])start.Clone();
+        foreach (var m in path)
+            testBoard = Apply(testBoard, m);
+
+        return AreEqual(testBoard, goal) ? path : null;
+    }
+
+
     IEnumerator PathAnimation(List<Swap> path, float delay = 0.2f)
     {
         if (path == null || path.Count == 0) yield break;
@@ -402,4 +441,35 @@ public class GameManager : MonoBehaviour
 
         isSolving = false;
     }
+
+    // last resort
+
+    int[] ShuffleAndRecordMoves(int[] goal, int n, int moves, out List<Swap> shufflePath)
+    {
+        var current = (int[])goal.Clone();
+        shufflePath = new List<Swap>();
+        var rand = new System.Random();
+
+        int blank = Array.IndexOf(current, 0);
+
+        for (int i = 0; i < moves; i++)
+        {
+            var possible = MovableTiles(current, n);
+            if (shufflePath.Count > 0)
+            {
+                // Prevent reversing previous move
+                var last = shufflePath[shufflePath.Count - 1];
+                possible.RemoveAll(m => m.a == last.b && m.b == last.a);
+            }
+
+            if (possible.Count == 0) break;
+
+            var move = possible[rand.Next(possible.Count)];
+            current = Apply(current, move);
+            shufflePath.Add(move);
+        }
+
+        return current;
+    }
+
 }

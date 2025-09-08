@@ -18,22 +18,32 @@ public class VerificationManager : MonoBehaviour
     private int moves = 0;
     private float suspicion = 0f;
 
+    [Header("End UI")]
+    public GameObject endPanel;
+    public TMP_Text endTitleText;
+    public TMP_Text endPercentText;
+    public Button endRestartButton;
+    public Button endQuitButton;
+
     void Start()
     {
+        endPanel.SetActive(false);
+
         // subscribe to simple events (we'll add them in GameManager next)
         game.onPlayerMove += OnPlayerMove;
         game.onPlayerSolved += OnPlayerSolved;
         game.onPlayerPressedSolve += OnPlayerPressedSolve;
         game.onPlayerHint += OnPlayerHint;
 
-        ResetSession();
+        ResetHUD();
     }
 
-    public void ResetSession()
+    public void ResetHUD()
     {
         moves = 0;
         suspicion = 0f;
         UpdateHUD();
+        if (endPanel != null) endPanel.SetActive(false);
     }
 
     void UpdateHUD()
@@ -84,5 +94,57 @@ public class VerificationManager : MonoBehaviour
         suspicion = Mathf.Clamp01(suspicion + hintPenalty);
         UpdateHUD();
         // (the actual hint action will be triggered from GameManager; this only updates the meter)
+    }
+
+    int HumanPercent(){
+        return Mathf.Clamp(Mathf.RoundToInt((1f - suspicion) * 100f), 0, 100);
+    }
+
+    string VerdictForPercent(int p)
+    {
+        if (p >= 90) return "You are Definitely Human!";
+        if (p >= 70) return "You are Probably Human.";
+        if (p >= 50) return "You might be Human.";
+        if (p >= 30) return "You are Probably NOT Human.";
+        return "You are Definitely NOT Human!";
+    }
+
+    public void ShowEndPanel(string title, string details, int percent)
+    {
+        if (endPanel != null) endPanel.SetActive(true);
+        if (endTitleText != null) endTitleText.text = title;
+        if (endPercentText != null) endPercentText.text = $"You are {percent}% human";
+
+        if (endRestartButton != null)
+        {
+            endRestartButton.onClick.RemoveAllListeners();
+            endRestartButton.onClick.AddListener(() =>
+            {
+                endPanel.SetActive(false);
+                RestartGame();
+                ResetHUD();
+            });
+        }
+
+        if (endQuitButton != null)
+        {
+            endQuitButton.onClick.RemoveAllListeners();
+            endQuitButton.onClick.AddListener(() =>
+            {
+                #if UNITY_EDITOR
+                    UnityEditor.EditorApplication.isPlaying = false;
+                #else
+                    Application.Quit();
+                #endif
+            });
+        }
+    }
+
+    public void RestartGame()
+    {
+        if (endRestartButton != null)
+        {
+
+        }
     }
 }

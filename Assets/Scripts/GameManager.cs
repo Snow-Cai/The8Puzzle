@@ -45,19 +45,19 @@ public class GameManager : MonoBehaviour
     public Color blankTint = new Color(1, 1, 1, 0);
     public Color tileTint = Color.white;        
 
-    // cache of sliced sprites for current N
     private Sprite[] slicedSprites;             // length = numTiles*numTiles (last = null for blank)
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
+        int startSize = BoardSizeForDifficulty(difficultyLevel);
+        numTiles = startSize; // ensure board is set to initial difficulty size
+
         BuildGoal();
         BuildBoard(); // sets up the tiles in a grid
         SliceImageForSize(numTiles);
         NewGame();
 
-        int startSize = BoardSizeForDifficulty(difficultyLevel);
-        SetSize(startSize); // ensure board is set to initial difficulty size
         if (difficultyLabel != null)
         {
             difficultyLabel.text = DifficultyName(difficultyLevel);
@@ -293,7 +293,7 @@ public class GameManager : MonoBehaviour
     public void SetSize(int n)
     {
         n = Mathf.Clamp(n, 3, 6);
-        if (n == numTiles) return;
+       if (n == numTiles) return;
 
         numTiles = n;
         BuildGoal();

@@ -10,7 +10,7 @@ public class VerificationManager : MonoBehaviour
 {
     [Header("Refs")]
     public GameManager game;
-    public TMP_Text movesText;
+    //public TMP_Text movesText;
     public Slider suspicionBar;
     public TMP_Text suspicionText;
     [SerializeField] float endPanelDelay = 0.8f; 
@@ -75,12 +75,13 @@ public class VerificationManager : MonoBehaviour
 
     void UpdateHUD()
     {
-        if (movesText != null) movesText.text = $"Moves: {moves}";
+        //if (movesText != null) movesText.text = $"Moves: {moves}";
         if (suspicionBar != null) suspicionBar.value = suspicion;
         if (suspicionText != null)
         {
             if (suspicion <= 0f) suspicionText.text = "Suspicion: None";
-            else if (suspicion < 0.5f) suspicionText.text = "Suspicion: Low";
+            else if (suspicion < 0.3f) suspicionText.text = "Suspicion: Low";
+            else if (suspicion < 0.7f) suspicionText.text = "Suspicion: Medium";
             else if (suspicion < 1f) suspicionText.text = "Suspicion: High";
             else suspicionText.text = "Suspicious!";
         }
@@ -178,9 +179,9 @@ public class VerificationManager : MonoBehaviour
             endQuitButton.onClick.AddListener(() =>
             {
                 #if UNITY_EDITOR
-                UnityEditor.EditorApplication.isPlaying = false;
+                    UnityEditor.EditorApplication.isPlaying = false;
                 #else
-                                Application.Quit();
+                    Application.Quit();
                 #endif
             });
         }

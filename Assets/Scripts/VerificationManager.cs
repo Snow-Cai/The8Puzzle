@@ -1,6 +1,10 @@
-﻿using UnityEngine;
+﻿// Name: Snow Cai
+// Email: snowc@unr.edu
+
+using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using System.Collections;
 
 public class VerificationManager : MonoBehaviour
 {
@@ -9,10 +13,12 @@ public class VerificationManager : MonoBehaviour
     public TMP_Text movesText;
     public Slider suspicionBar;
     public TMP_Text suspicionText;
+    [SerializeField] float endPanelDelay = 0.8f; 
+    bool deferFailUntilSolved = false;
 
     [Header("Rules")]
     [Range(0f, 1f)] public float hintPenalty = 0.1f;
-    public bool failOnSolve = true;                   // pressing Solve is “suspicious”
+    public bool failOnSolve = true;   // pressing Solve is “suspicious”
 
     // state
     private int moves = 0;
@@ -24,26 +30,47 @@ public class VerificationManager : MonoBehaviour
     public TMP_Text endPercentText;
     public Button endRestartButton;
     public Button endQuitButton;
+    public Button endCloseButton;
+
+    [Header("Info UI")]
+    public GameObject infoPanel;
+    public Button infoButton;
+    public Button infoCloseButton;
+    public Button infoEndButton;
 
     void Start()
     {
-        endPanel.SetActive(false);
+        if (endPanel != null) endPanel.SetActive(false);
+        if (infoPanel != null) infoPanel.SetActive(false);
 
-        // subscribe to simple events (we'll add them in GameManager next)
+        // subscribe to events from GameManager
         game.onPlayerMove += OnPlayerMove;
         game.onPlayerSolved += OnPlayerSolved;
         game.onPlayerPressedSolve += OnPlayerPressedSolve;
         game.onPlayerHint += OnPlayerHint;
 
-        ResetHUD();
+        ResetSession();
     }
 
-    public void ResetHUD()
+    private void Update()
+    {
+        if (infoButton != null)
+        {
+            infoButton.onClick.RemoveAllListeners();
+            infoButton.onClick.AddListener(() =>
+            {
+                ShowInfoPanel();
+            });
+        }
+    }
+
+    public void ResetSession()
     {
         moves = 0;
         suspicion = 0f;
         UpdateHUD();
         if (endPanel != null) endPanel.SetActive(false);
+        if (infoPanel != null) infoPanel.SetActive(false);
     }
 
     void UpdateHUD()
@@ -67,20 +94,33 @@ public class VerificationManager : MonoBehaviour
 
     void OnPlayerSolved()
     {
-        // simple pass/fail messaging (no timer)
-        if (suspicion >= 1f)
-            Debug.Log("Suspicious: solved but over suspicion threshold.");
+        // Decide verdict/percent at the moment of solve
+        int percent = Mathf.Clamp(Mathf.RoundToInt((1f - suspicion) * 100f), 0, 100);
+        string verdict;
+
+        if (suspicion >= 1f || deferFailUntilSolved)
+            verdict = "You are Definitely NOT Human!";
         else
-            Debug.Log("Verified Human: solved with acceptable suspicion.");
+            verdict = VerdictForPercent(percent);
+
+        StartCoroutine(ShowEndPanelAfterDelay(verdict, percent, endPanelDelay));
+    }
+
+    IEnumerator ShowEndPanelAfterDelay(string verdict, int percent, float delay)
+    {
+        if (delay > 0f) yield return new WaitForSeconds(delay);
+        ShowEndPanel(verdict, percent);
+        deferFailUntilSolved = false; // clear for next round
     }
 
     void OnPlayerPressedSolve()
     {
         if (failOnSolve)
         {
-            suspicion = 1f;   // max it
+            // Don’t show the panel yet; let the AI animate first.
+            suspicion = 1f;
             UpdateHUD();
-            Debug.Log("🤖 Suspicious: Solve was used.");
+            deferFailUntilSolved = true;
         }
         else
         {
@@ -93,27 +133,33 @@ public class VerificationManager : MonoBehaviour
     {
         suspicion = Mathf.Clamp01(suspicion + hintPenalty);
         UpdateHUD();
-        // (the actual hint action will be triggered from GameManager; this only updates the meter)
+
+        // If you also want to wait until the puzzle is solved before showing failure:
+        if (suspicion >= 1f)
+            deferFailUntilSolved = true; // panel will appear after solve
     }
 
-    int HumanPercent(){
-        return Mathf.Clamp(Mathf.RoundToInt((1f - suspicion) * 100f), 0, 100);
-    }
+    int HumanPercent() =>
+        Mathf.Clamp(Mathf.RoundToInt((1f - suspicion) * 100f), 0, 100);
 
     string VerdictForPercent(int p)
     {
         if (p >= 90) return "You are Definitely Human!";
-        if (p >= 70) return "You are Probably Human.";
-        if (p >= 50) return "You might be Human.";
-        if (p >= 30) return "You are Probably NOT Human.";
+        if (p >= 70) return "You are Probably Human?";
+        if (p >= 50) return "You Might be Human?";
+        if (p >= 30) return "You are Probably NOT Human";
         return "You are Definitely NOT Human!";
     }
 
-    public void ShowEndPanel(string title, string details, int percent)
+    void ShowEndPanel(string verdict, int percent)
     {
         if (endPanel != null) endPanel.SetActive(true);
-        if (endTitleText != null) endTitleText.text = title;
+        if (endTitleText != null) endTitleText.text = verdict;
         if (endPercentText != null) endPercentText.text = $"You are {percent}% human";
+
+        // audio stuff
+        if (verdict.Contains("Human"))
+            AudioManager.Instance?.PlayWin();
 
         if (endRestartButton != null)
         {
@@ -121,8 +167,8 @@ public class VerificationManager : MonoBehaviour
             endRestartButton.onClick.AddListener(() =>
             {
                 endPanel.SetActive(false);
-                RestartGame();
-                ResetHUD();
+                game.NewGame();     // or game.RestartGame() if you added one
+                ResetSession();
             });
         }
 
@@ -132,19 +178,44 @@ public class VerificationManager : MonoBehaviour
             endQuitButton.onClick.AddListener(() =>
             {
                 #if UNITY_EDITOR
-                    UnityEditor.EditorApplication.isPlaying = false;
+                UnityEditor.EditorApplication.isPlaying = false;
                 #else
-                    Application.Quit();
+                                Application.Quit();
                 #endif
+            });
+        }
+
+        if (endCloseButton != null)
+        {
+            endCloseButton.onClick.RemoveAllListeners();
+            endCloseButton.onClick.AddListener(() =>
+            {
+                endPanel.SetActive(false);
+                ResetSession();
             });
         }
     }
 
-    public void RestartGame()
+    void ShowInfoPanel()
     {
-        if (endRestartButton != null)
-        {
+        infoPanel.SetActive(true);
 
+        if (infoCloseButton != null)
+        {
+            infoCloseButton.onClick.RemoveAllListeners();
+            infoCloseButton.onClick.AddListener(() =>
+            {
+                infoPanel.SetActive(false);
+            });
+        }
+
+        if (infoEndButton != null)
+        {
+            infoEndButton.onClick.RemoveAllListeners();
+            infoEndButton.onClick.AddListener(() =>
+            {
+                infoPanel.SetActive(false);
+            });
         }
     }
 }

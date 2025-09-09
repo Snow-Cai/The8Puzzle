@@ -1,10 +1,10 @@
-﻿using System;
+﻿// Name: Snow Cai
+// Email: snowc@unr.edu
+
+using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -44,8 +44,13 @@ public class GameManager : MonoBehaviour
     public Texture2D puzzleImage;              
     public Color blankTint = new Color(1, 1, 1, 0);
     public Color tileTint = Color.white;        
-
     private Sprite[] slicedSprites;             // length = numTiles*numTiles (last = null for blank)
+    public Texture2D[] puzzleImages;
+    [SerializeField] Color imageBorderColor = new Color(0, 0, 0, 0.5f);
+    [SerializeField] float imageBorderThickness = 2f;
+    public UnityEngine.UI.Image boardBackground;
+
+    public VerificationManager verificationManager;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -82,26 +87,59 @@ public class GameManager : MonoBehaviour
 
     void BuildBoard()
     {
+        // clear old
         foreach (Transform child in boardParent)
             Destroy(child.gameObject);
         tiles.Clear();
 
-        var size = Mathf.Min(boardParent.rect.width, boardParent.rect.height);
-        var cell = Mathf.FloorToInt(size / numTiles);
+        // available square inside boardParent
+        int outerMargin = 5;
+        float availW = boardParent.rect.width - 2 * outerMargin;
+        float availH = boardParent.rect.height - 2 * outerMargin;
+        float square = Mathf.Min(availW, availH);
+
+        // seamless in image mode (no padding / spacing)
+        int pad = 8;
+        int gap = 8;
+
+        // compute exact cell so: n*cell + (n-1)*gap + 2*pad == square (floored to int px)
+        float cell = Mathf.Floor((square - 2 * pad - (numTiles - 1) * gap) / numTiles);
+
+        // configure grid
         gridLayout.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
         gridLayout.constraintCount = numTiles;
         gridLayout.cellSize = new Vector2(cell, cell);
-        gridLayout.spacing = new Vector2(8, 8);
-        gridLayout.padding.left = gridLayout.padding.right = gridLayout.padding.top = gridLayout.padding.bottom = 8;
+        gridLayout.spacing = new Vector2(gap, gap);
+        gridLayout.padding.left = gridLayout.padding.right = gridLayout.padding.top = gridLayout.padding.bottom = pad;
+        gridLayout.childAlignment = TextAnchor.MiddleCenter;
 
+        // spawn tiles
         for (int i = 0; i < numTiles * numTiles; i++)
             tiles.Add(Instantiate(tilePrefab, boardParent));
     }
 
     public void NewGame() //make sure it's solvable
     {
+        if (verificationManager != null)
+            verificationManager.ResetSession();
+
         if (tiles.Count != numTiles * numTiles)
             BuildBoard();
+
+        if (useImage && puzzleImages != null && puzzleImages.Length > 0)
+        {
+            int idx = UnityEngine.Random.Range(0, puzzleImages.Length);
+            puzzleImage = puzzleImages[idx];
+            SliceImageForSize(numTiles);
+
+            if (boardBackground != null)
+                boardBackground.sprite = Sprite.Create(
+                    puzzleImage,
+                    new Rect(0, 0, puzzleImage.width, puzzleImage.height),
+                    new Vector2(0.5f, 0.5f),
+                    100f
+                );
+        }
 
         state = (int[])goal.Clone();
 
@@ -128,6 +166,7 @@ public class GameManager : MonoBehaviour
                     tiles[i].SetSprite(null);
                     tiles[i].SetImageTint(blankTint);
                     tiles[i].SetNumberVisible(false);
+                    tiles[i].SetBorder(false, imageBorderColor, imageBorderThickness);
                 }
                 else
                 {
@@ -136,6 +175,7 @@ public class GameManager : MonoBehaviour
                     tiles[i].SetSprite(spr);
                     tiles[i].SetImageTint(tileTint);
                     tiles[i].SetNumberVisible(overlayNumbersInImageMode); // hide numbers in image mode (or true if you want tiny labels)
+                    tiles[i].SetBorder(false, imageBorderColor, imageBorderThickness);
                 }
             }
             else
@@ -144,6 +184,7 @@ public class GameManager : MonoBehaviour
                 tiles[i].SetSprite(null);
                 tiles[i].SetImageTint(tileTint);
                 tiles[i].SetNumberVisible(true);
+                tiles[i].SetBorder(false, imageBorderColor, imageBorderThickness);
             }
         }
         if (IsGoal()) Debug.Log("Solved!");
@@ -164,6 +205,13 @@ public class GameManager : MonoBehaviour
 
             if (IsGoal())
                 onPlayerSolved?.Invoke();
+
+            // remove hint border after *any* tile click
+            if (activeHintTile != null)
+            {
+                activeHintTile.SetBorder(false, Color.yellow, 5f);
+                activeHintTile = null;
+            }
         }
     }
 
@@ -296,6 +344,10 @@ public class GameManager : MonoBehaviour
        if (n == numTiles) return;
 
         numTiles = n;
+
+        if (verificationManager != null)
+            verificationManager.ResetSession();
+
         BuildGoal();
         BuildBoard();
         SliceImageForSize(numTiles);
@@ -320,6 +372,59 @@ public class GameManager : MonoBehaviour
         }        
     }
 
+    private Tile activeHintTile = null;
+
+    public void HintOneMove()
+    {
+        //if solved or solving, no hint and play a error sound
+        if (IsGoal() || isSolving) 
+        {
+            AudioManager.Instance?.PlayError();
+            return; 
+        }
+
+        onPlayerHint?.Invoke();
+
+        // compute once after player clicked hint, then saves this path in case player clicks hint again.
+        // If again, use this saved path else recompute.
+
+        var startCopy = (int[])state.Clone();
+        var path = BiBFS(startCopy, goal, numTiles);
+
+        if (path != null && path.Count > 0)
+        {
+            var mv = path[0];
+            int tileIndex = mv.b;
+            var t = tiles[tileIndex];
+
+            if (activeHintTile != null && activeHintTile != t)
+                activeHintTile.SetBorder(false, Color.yellow, 5f);
+
+            activeHintTile = t;
+            t.SetBorder(true, Color.yellow, 5f);   // turn on border
+
+            StartCoroutine(HintPulse(t));
+        }
+    }
+
+    IEnumerator HintPulse(Tile t)
+    {
+        var rt = t.GetComponent<RectTransform>();
+        Vector3 start = rt.localScale;
+
+        // pulse strength & duration depend on board size
+        float strength = (numTiles >= 5) ? 0.15f : 0.08f; // bigger boards pulse larger
+        float duration = (numTiles >= 5) ? 1f : 0.4f;   // longer on 5x5 / 6x6
+
+        for (float a = 0; a < duration; a += Time.deltaTime)
+        {
+            float k = 1f + strength * Mathf.Sin(a * Mathf.PI * 3f);
+            rt.localScale = start * k;
+            yield return null;
+        }
+
+        rt.localScale = start;
+    }
 
     // AI solve
     public void Solve()
@@ -330,7 +435,7 @@ public class GameManager : MonoBehaviour
         var startCopy = (int[])state.Clone();
         List<Swap> path = null;
 
-        int shuffleDepth = GetBfsEasyShuffle(numTiles);
+        int shuffleDepth = GetBfsEasyShuffle(numTiles) + 5;
 
         path = BiBFS(startCopy, goal, numTiles, maxDepth: shuffleDepth);
 
@@ -563,36 +668,6 @@ public class GameManager : MonoBehaviour
         }
 
         return current;
-    }
-    public void HintOneMove()
-    {
-        onPlayerHint?.Invoke();
-
-        // minimal hint: compute a path once and highlight the first move
-        var startCopy = (int[])state.Clone();
-        var path = BiBFS(startCopy, goal, numTiles);
-
-        if (path != null && path.Count > 0)
-        {
-            var mv = path[0];
-            // highlight the tile at index mv.b (the one sliding into blank)
-            int tileIndex = mv.b; // mv = new Swap(blankIndex, neighborIndex)
-            var t = tiles[tileIndex];
-            StartCoroutine(HintPulse(t));
-        }
-    }
-
-    IEnumerator HintPulse(Tile t)
-    {
-        var rt = t.GetComponent<RectTransform>();
-        Vector3 start = rt.localScale;
-        for (float a = 0; a < 0.4f; a += Time.deltaTime)
-        {
-            float k = 1f + 0.08f * Mathf.Sin(a * Mathf.PI * 3f);
-            rt.localScale = start * k;
-            yield return null;
-        }
-        rt.localScale = start;
     }
 
 }

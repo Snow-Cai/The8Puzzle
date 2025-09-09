@@ -1,3 +1,6 @@
+// Name: Snow Cai
+// Email: snowc@unr.edu
+
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
@@ -26,6 +29,16 @@ public class Tile : MonoBehaviour
         button.interactable = (value != 0); // interactable when its not 0
         button.onClick.RemoveAllListeners();
         button.onClick.AddListener(() => onClickTile?.Invoke(this));
+
+        if (button) //button wiring
+        {
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(() =>
+            {
+                onClickTile?.Invoke(this);          // your game logic callback
+                AudioManager.Instance?.PlayClick(); // <--- play click SFX
+            });
+        }
     }
 
     public void SetIneractable(bool interactable)
@@ -62,4 +75,24 @@ public class Tile : MonoBehaviour
         }
     }
 
+    public Outline tileOutline;
+
+    Outline EnsureOutline()
+    {
+        if (tileOutline == null)
+        {
+            tileOutline = GetComponent<Outline>();
+            if (tileOutline == null) tileOutline = gameObject.AddComponent<Outline>();
+        }
+        return tileOutline;
+    }
+
+    public void SetBorder(bool on, Color color, float thickness = 1f)
+    {
+        var ol = EnsureOutline();
+        ol.enabled = on;
+        ol.effectColor = color;
+        // thickness in pixels: Outline uses a single effectDistance vector
+        ol.effectDistance = new Vector2(thickness, thickness);
+    }
 }

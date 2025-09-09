@@ -139,6 +139,7 @@ MonoBehaviour:
   value: 0
   button: {fileID: 4719811071595939910}
   buttonNum: {fileID: 7191555110325134510}
+  tileOutline: {fileID: 0}
 --- !u!1 &8897232779611807644
 GameObject:
   m_ObjectHideFlags: 0
@@ -214,8 +215,8 @@ MonoBehaviour:
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
-    rgba: 4026531839
-  m_fontColor: {r: 1, g: 1, b: 1, a: 0.9372549}
+    rgba: 3875536895
+  m_fontColor: {r: 1, g: 1, b: 1, a: 0.9019608}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:

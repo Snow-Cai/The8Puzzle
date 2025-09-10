@@ -430,7 +430,11 @@ public class GameManager : MonoBehaviour
     public void Solve()
     {
         onPlayerPressedSolve?.Invoke();
-        if (isSolving) return;
+        if (IsGoal() || isSolving)
+        {
+            AudioManager.Instance?.PlayError();
+            return;
+        }
 
         var startCopy = (int[])state.Clone();
         List<Swap> path = null;
